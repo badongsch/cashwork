@@ -1,0 +1,875 @@
+<?php
+/********************************************************************************************/
+// 프로그램명        :  target_func_app.rc
+// 설명              :  앱타겟팅 API target funciton
+// 작성자            :  류동수
+// 작성일            :  2022.04.18
+// 수정일            :  
+// 프로그램 설명     :  앱타겟팅 API target funciton
+// 처리절차          :  
+// 수정사항          :  
+/********************************************************************************************/
+
+// 거부전략 필터링
+function filter_reject_sgidx(&$reject_sg,$db_dsp_ex2){
+	global $test;
+
+	$sgidx_filter_list = "";
+	$rej_sg_filter_arr = array();
+	
+	$rej_sg_filter_arr = explode(",",$reject_sg);
+	if(count($rej_sg_filter_arr)>0){
+		$WHERE_REJECT_SG_FILTER = array("sg_idx" => array('$in'=> $rej_sg_filter_arr));
+        
+		if($db_dsp_ex2->dsp_ad_strategy->find($WHERE_REJECT_SG_FILTER)->count()) {
+			$find_sg = $db_dsp_ex2->dsp_ad_strategy->find($WHERE_REJECT_SG_FILTER);
+			foreach ($find_sg as $find_data) {
+					$sgidx_filter_list .= $find_data['sg_idx'].",";	
+			}
+			if($sgidx_filter_list != ""){
+				$sgidx_filter_list = substr($sgidx_filter_list, 0, strlen($sgidx_filter_list)-1);
+				$reject_sg = $sgidx_filter_list;
+			}		
+		} else {
+			$reject_sg = "";
+		}
+	}
+}
+
+/* 지역코드 확인 */
+function fn_kcube(){
+    $adareacode = "kcube";
+    $REMOTE_ADDR = $_SERVER["REMOTE_ADDR"];
+    $url = "http://13.125.167.164:5003/cgi-bin/y.fcgi?ip=$REMOTE_ADDR";
+    $k_content = get_curl_local($url);
+    $arrAcode  = explode(':',$k_content);
+    $areacode_ori  = str_replace (",", "", $arrAcode[1]);
+    if(!is_numeric($areacode_ori)) {
+        $areacode_ori = "99999";
+    } else {
+        $kcube_cookie = 1;
+    }
+    $arr_fn_kcube[areacode_ori] = $areacode_ori;
+    $arr_fn_kcube[kcube_cookie] = $kcube_cookie;
+
+    return $arr_fn_kcube;
+}
+
+// kcube  curl로 가져오기
+function get_curl_local($url){ 	
+    $ch = curl_init(); //파라미터:url -선택사항    
+    curl_setopt($ch,CURLOPT_URL,$url); //여기선 url을 변수로
+    curl_setopt($ch,CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch,CURLOPT_NOSIGNAL, 1);
+	curl_setopt($ch,CURLOPT_TIMEOUT, 1);    
+	curl_setopt($ch,CURLOPT_CONNECTTIMEOUT, 1); 
+    $data = curl_exec($ch);
+    $curl_errno = curl_errno($ch);
+    $curl_error = curl_error($ch);    
+    curl_close($ch);
+    return $data;
+}
+
+
+
+// 선택한 ID에 대한 전략 리스트
+function data_mongo_uid_sgidx_ex($dbinfo, $uid){	
+	$mongo_info_ex2 = $dbinfo['MONGODB_DSP_LOCALHOST'];
+	$connectionString_ex2 = sprintf('mongodb://%s:%s@%s:%d',  $mongo_info_ex2[db_user], $mongo_info_ex2[db_passwd],  $mongo_info_ex2[db_host], $mongo_info_ex2[db_port]);
+	try {		
+	    $conn_dsp_ex2 = new MongoClient($connectionString_ex2);
+	    $db_dsp_ex2 = $conn_dsp_ex2->realdsp;
+	    $mongo_err_ex2 = false;
+	} catch (MongoConnectionException $e) {
+	    $mongo_err_ex2 = true;
+	}
+	
+	if(!$mongo_err_ex2)
+	{
+		$restore_sgidx = array();
+		GLOBAL $test;
+		$WHERE = array("uid" => $uid);
+		$sgidx_list = "";
+		if($uid != ''){
+			if($db_dsp_ex2->dsp_ad_strategy->find($WHERE)->count()) {
+				$find_sg = $db_dsp_ex2->dsp_ad_strategy->find($WHERE);
+				foreach ($find_sg as $find_data) {
+						$sgidx_list .= $find_data['sg_idx'].",";	
+				}
+				if($sgidx_list != ""){
+					$sgidx_list = substr($sgidx_list, 0, strlen($sgidx_list)-1);
+				}		
+			}
+		}
+		
+    	$conn_dsp_ex2->close();
+	}
+	return $sgidx_list;
+}
+
+/* 폰아이디(rpid) 매칭 전략 확인 
+fn_rpid_sg_idx(거부전략)
+*/
+function fn_rpid_sg_idx(){
+    global $rpid, $adid, $media_info, $dbinfo, $test;
+    
+    // [ 폰아이디/ ADID 체크 ] =====
+    if( $rpid || $adid ){
+        // [ADID] 
+        if($adid) {
+            $tg_adid = $adid;
+            $redis_select = 14;
+        }
+        // [폰아이디] 
+        else{
+            $tg_adid = $rpid;
+            $redis_select = 13;
+        }
+    }
+    $reject_sg_shop_arr = explode(",",$media_info['reject_sg']); // 거부전략
+    // 장바구니
+    $key_rtbdsp = "{$tg_adid}:RTBDSP";
+    // 상세보기
+    $key_rtddsp = "{$tg_adid}:RTDDSP";
+    // 리타겟팅
+    $key_rtkeycode = "{$tg_adid}:M_RTKEYCODE";
+    //echo "<br>";
+
+    
+    $shopping_freq = 20;            // 쇼핑타겟팅 프리퀀시
+    $COOK_SAVE_1 = 1*24*3600;       // 쇼핑타겟팅 리플레시 시간(1일)
+    $now_time_ck = time();
+
+    $media_app_redis    = fn_app_sg_matching();
+    $media_app_redis -> select($redis_select);
+    
+    // 쇼핑타겟팅(장바구니)
+    $rtbdsp_sg_info     = $media_app_redis->hgetall($key_rtbdsp);
+
+    foreach ($rtbdsp_sg_info as $key => $val) {
+        if(in_array($key, $reject_sg_shop_arr)){ continue; }
+        if(preg_match("/[^a-zA-Z0-9_-]+/",$key) || trim($key) == "") continue;
+        $arr_rtd = explode("|", $val);
+        $arr_rtd_time = explode(":",$arr_rtd[0]);
+        $arr_json = json_decode($arr_rtd[1],true);
+        unset($arr_key);
+        foreach ($arr_json as $var1) {
+            foreach($var1 as $key2 => $val2){
+                $arr_key[] = $key2;
+            }
+        }
+        $json_key = json_encode($arr_key);
+
+        if($now_time_ck >= ($arr_rtd_time[0]+$COOK_SAVE_1) || $arr_rtd_time[1] < $shopping_freq){
+            $arr_target_index[$arr_rtd_time[0]+$time_sec]['adno'] = $key;
+            $arr_tmp_index[$key] = $json_key;
+            $time_sec++;
+        }
+    }
+
+    // 쇼핑타겟팅(상세페이지)
+    $rtddsp_sg_info     = $media_app_redis->hgetall($key_rtddsp);
+    foreach ($rtddsp_sg_info as $key => $val) {
+        if( in_array($key, $reject_sg_shop_arr) ){ continue; }
+        if(preg_match("/[^a-zA-Z0-9_-]+/",$key) || trim($key) == "") continue;
+        $arr_rtd = explode("|", $val);
+        $arr_rtd_time = explode(":",$arr_rtd[0]);
+        $arr_json = json_decode($arr_rtd[1],true);
+        unset($arr_key);
+        foreach ($arr_json as $var1) {
+            foreach($var1 as $key2 => $val2){
+                $arr_key[] = $key2;
+            }
+        }
+        
+        $json_key = implode("|",$arr_key);
+
+        if($now_time_ck >= ($arr_rtd_time[0]+$COOK_SAVE_1) || $arr_rtd_time[1] < $shopping_freq){
+            $arr_target_index[$arr_rtd_time[0]+$time_sec]['adno'] = $key;
+            $arr_tmp_index[$key] = $json_key;
+            $time_sec++;
+        }
+    }
+
+    if(count($arr_target_index)>0) {
+        krsort($arr_target_index); // 쇼핑타겟팅 전략번호가 최근에 쌓인 순서대로 정렬
+        foreach ($arr_target_index as $key => $val){
+            $sg_idx = $val[adno];
+            $sg_type = $val[type];
+            $arr_sg_idx[SRT][$sg_idx] = $arr_tmp_index[$sg_idx]; // 쇼핑 전략번호
+        }
+    }
+    if($test){
+        echo "<b>[쇼타전략] : </b>".json_encode($arr_sg_idx[SRT])."<br>";
+    }
+
+    // 리타겟팅
+    $rtkeycode_sg_info  = $media_app_redis->hgetall($key_rtkeycode);
+    if(count($rtkeycode_sg_info) > 0){
+        $arr_sg_idx[RT] = array_unique($rtkeycode_sg_info);
+        $arr_sg_idx[RT] = array_keys($arr_sg_idx[RT]);
+    }
+
+    if($test){
+        echo "<b>[리타전략] : </b>".json_encode($arr_sg_idx[RT])."<br>";
+    }
+    //print_r($arr_tmp_index);
+    
+    $media_app_redis->close();
+    return $arr_sg_idx;
+}
+
+/* 유저관심사
+fn_interest_info(type[ip,])
+*/
+
+function fn_interest_info($realucode){
+    global $dbinfo, $app_user_mtype, $test;
+    $category_detail_def_arr = array("u101","u102","u103","u104","u201","u202","u203","u204","u205","u206","u301","u302","u303","u304","u401","u402","u403","u404","u405","u406","u407","u408","u501","u502","u503","u504","u505","u506","u507","u601","u602","u603","u604","u605","u606","u607","u608","u609","u701","u702","u703","u704","u705","u706","u707","u708","u709","u801","u802","u803");
+    $interest_count = 20;
+    $ad_interest = array();
+
+    if($realucode){
+        if($app_user_mtype != 0){
+			$g_uinfotable = "user_info_M:user_code:c_"; // user_info_M:user_code:c_MS40Ni43Ni4xNTV8MTU5MjgwMDM4Mnw1MTYx
+		} else {
+			$g_uinfotable = "user_info_P:user_code:c_"; // user_info_P:user_code:c_MS41Mi4xMjEuNTF8MTU5MzY5ODk4M3wyNjQ0
+		}
+
+		$g_uinfotable.= $realucode;
+		$media_redis_uinfo->select($redis_uinfo[db_db]);
+		$media_uinfo = $media_redis_uinfo->hgetall($g_uinfotable);  // Array ( [u406] => 1 [u503] => 1 [u802] => 4 [a10] => 6 [a20] => 10 [a30] => 10 [female] => 6 [u803] => 3 [a40] => 2 [a50] => 1 [male] => 8 [u304] => 1 [u407] => 1 [u708] => 1 [u801] => 3 [u101] => 1 [u102] => 1 [u303] => 3 [u602] => 1 [u706] => 1 )
+		$user_info_matching_chk = count($media_uinfo);
+    }
+
+    if( $user_info_matching_chk > 0 ) {
+        if($test){
+                echo "<b>[ 유저(코드) 인구통계 ] : </b>관심사 매칭됨</b><br/>";
+            }
+			// 관심사
+			$ad_interest_arr = $temp_ad_interest_arr = array();
+			$def_idx = 1;
+			foreach($media_uinfo as $muk => $muv){
+				if($muk != "male" && $muk != "female" && $muk != "a10" && $muk != "a20" && $muk != "a30" && $muk != "a40" && $muk != "a50"){
+					$ad_interest_arr[$muk] = $muv;
+					if($def_idx <= 20){
+						$def_k = array_search($muk,$category_detail_def_arr); 
+						if($def_k!==FALSE) unset($category_detail_def_arr[$def_k]); 
+					}
+					$def_idx++;
+				}
+			}
+			$total_interest_exist = 0 ;
+			$total_interest_exist = ($for_count-count($ad_interest_arr));
+			
+			if(count($ad_interest_arr)<$for_count){
+				shuffle($category_detail_def_arr);
+				for($interest_exist_idx=0;$interest_exist_idx<$total_interest_exist;$interest_exist_idx++){
+					$ad_interest_arr[$category_detail_def_arr[$interest_exist_idx]] = 1;
+				}
+			}
+
+            // [ 관심사 ] ==========
+            $for_count = $interest_count;	
+            foreach($ad_interest_arr as $ad_key => $ad_value){
+                if($for_count > 0) {
+                    if(substr($ad_key,1)<10)
+                    {
+                        $ad_key_0 = substr($ad_key,2);
+                    } else {
+                        $ad_key_0 = substr($ad_key,1);
+                    }
+                    $ad_interest = array_merge($ad_interest,array($ad_key_0));
+                    $ad_interest_ad_key .= $ad_key.",";
+                    $for_count--;
+                }
+            }
+            
+            $ad_interest = array_merge($ad_interest,array("","N"));
+            $ad_interest = array_unique($ad_interest);
+            $ad_interest = array_values($ad_interest);
+
+            $WHERE_contents_interest = array('contents_interest'=>array('$in'=> $ad_interest));
+            $WHERE_interest = $WHERE_contents_interest;
+
+            if($test){
+                echo "<b>[ 관심사(IP) 조건문 ] : </b>";
+                echo json_encode($WHERE_contents_interest)."<br/>";
+            }
+
+            // 성별 통계
+			if($media_uinfo['male'] > $media_uinfo['female']) {
+                $arr_human_static_sex= array("m","");
+			} elseif($media_uinfo['male'] < $media_uinfo['female']) {
+                $arr_human_static_sex= array("f","");
+			} elseif($media_uinfo['male'] == $media_uinfo['female']) {
+                $arr_human_static_sex= array("m","f","");
+				if(mt_rand(0,1)==0){
+					$human_static_sex = "f";
+				} else {
+					$human_static_sex = "m";
+				}
+			}
+
+			// echo $human_static_sex."<br/>";
+			// 관심사 전체 설정
+        	if(mt_rand(0,1)==0){					
+				$WHERE_human_static_sex = array('human_static_sex'=>array('$in'=> array('m','f','')));
+			} else {
+				$WHERE_human_static_sex = array('human_static_sex'=>array('$in'=> $arr_human_static_sex));
+			}		   
+			$WHERE_interest = array_merge($WHERE_interest,$WHERE_human_static_sex);
+            if($test){
+                echo "<b>[ 성별(코드) 조건문 ] : </b>";
+                echo json_encode($WHERE_human_static_sex)."<br/>";
+            }
+
+			// 연령별 통계
+			$human_static_age_arr = array("a10"=>$media_uinfo['a10'],"a20"=>$media_uinfo['a20'],"a30"=>$media_uinfo['a30'],"a40"=>$media_uinfo['a40'],"a50"=>$media_uinfo['a50']);    
+			arsort($human_static_age_arr);
+			$for_count = 1; // 나올연령별 통계 수
+			foreach($human_static_age_arr as $age_key => $age_value){
+				if($for_count > 0) {
+					switch($age_key){
+						case 'a10':
+							$human_age = '1';
+							break;
+						case 'a20':
+							$human_age = '2';
+							break;
+						case 'a30':
+							$human_age = '3';
+							break;
+						case 'a40':
+							$human_age = '4';
+							break;
+						case 'a50':
+							$human_age = '5';
+							break;
+					}
+					$human_static_age .= $human_age.",";
+					$for_count--;
+				}
+			}
+			$human_static_age = substr($human_static_age, 0, strlen($human_static_age)-1);
+			
+			// 관심사 전체 설정
+        	if(mt_rand(0,1)==0){
+				$WHERE_human_static_age = array('human_static_age'=>array('$in'=> array('1','2','3','4','5','')));
+			} else {
+				$WHERE_human_static_age = array('human_static_age'=>array('$in'=> array($human_static_age,'')));
+			}
+			$WHERE_interest = array_merge($WHERE_interest,$WHERE_human_static_age);
+
+            if($test){
+                echo "<b>[ 나이(코드) 조건문 ] : </b>";
+                echo json_encode($WHERE_human_static_age)."<br/>";
+            }
+    }
+    else{
+        $media_redis_uinfo = new Redis();	//redis DB 셋팅
+        try {   // localhost 레디스 접속
+            if($test){
+                echo "<b>[ 유저 관심사 정보 확인 ] : </b>UINFO_REDIS<br/>";
+                $redis_uinfo_tl." CORRECT";
+            }
+            $ru_redis = rand(1, 2);
+            
+            if($ru_redis == 1){
+                $redis_uinfo  = $dbinfo['UINFO_REDIS_SL'];
+                $redis_uinfo_tl = "UINFO_REDIS_SL";
+            } else {
+                $redis_uinfo  = $dbinfo['UINFO_REDIS_SL2'];
+                $redis_uinfo_tl = "UINFO_REDIS_SL2";
+            }
+            $media_redis_uinfo->connect($redis_uinfo[db_host],$redis_uinfo[db_port]);
+            $media_redis_uinfo->auth($redis_uinfo[db_passwd]);
+        } catch (Exception $e) { 
+            if($test){
+                echo "<b>[ 유저 관심사 정보 확인 ] : </b>UINFO_REDIS<br/>";
+                $redis_uinfo_tl." UINFO_REDIS NOT CORRECT";
+            }
+        }
+
+        if($app_user_mtype != 0){
+            $g_uinfotable = "user_info_M:user_ip:"; // user_info_M:user_ip:1.102.64.63
+        } else {
+            $g_uinfotable = "user_info_P:user_ip:"; // user_info_P:user_ip:1.101.187.26
+        }
+        $g_uinfotable.=$_SERVER["REMOTE_ADDR"];
+        $media_redis_uinfo->select($redis_uinfo[db_db]);
+        $media_uinfo = $media_redis_uinfo->hgetall($g_uinfotable);
+        $user_info_matching_chk = count($media_uinfo);
+
+        if( $user_info_matching_chk > 0 ) {
+            if($test){
+                echo "<b>[ 유저(IP) 인구통계 ] : </b>관심사 매칭됨</b><br/>";
+            }
+			// 관심사
+			$ad_interest_arr = $temp_ad_interest_arr = array();
+			$def_idx = 1;
+			foreach($media_uinfo as $muk => $muv){
+				if($muk != "male" && $muk != "female" && $muk != "a10" && $muk != "a20" && $muk != "a30" && $muk != "a40" && $muk != "a50"){
+					$ad_interest_arr[$muk] = $muv;		
+					if($def_idx <= 20){
+						$def_k = array_search($muk,$category_detail_def_arr); 
+						if($def_k!==FALSE) unset($category_detail_def_arr[$def_k]); 
+					}
+					$def_idx++;
+				}
+			}
+			$total_interest_exist = 0 ;
+			$total_interest_exist = ($for_count-count($ad_interest_arr));
+			
+			if(count($ad_interest_arr)<$for_count){
+				shuffle($category_detail_def_arr);
+				for($interest_exist_idx=0;$interest_exist_idx<$total_interest_exist;$interest_exist_idx++){
+					$ad_interest_arr[$category_detail_def_arr[$interest_exist_idx]] = 1;
+				}
+			}
+            
+            // [ 관심사 ] ==========
+            $for_count = $interest_count;	
+            foreach($ad_interest_arr as $ad_key => $ad_value){
+                if($for_count > 0) {
+                    if(substr($ad_key,1)<10)
+                    {
+                        $ad_key_0 = substr($ad_key,2);
+                    } else {
+                        $ad_key_0 = substr($ad_key,1);
+                    }
+                    $ad_interest = array_merge($ad_interest,array($ad_key_0));
+                    $ad_interest_ad_key .= $ad_key.",";
+                    $for_count--;
+                }
+            }
+            
+            $ad_interest = array_merge($ad_interest,array("","N"));
+            $ad_interest = array_unique($ad_interest);
+            $ad_interest = array_values($ad_interest);
+
+            $WHERE_contents_interest = array('contents_interest'=>array('$in'=> $ad_interest));
+            $WHERE_interest = $WHERE_contents_interest;
+
+            if($test){
+                echo "<b>[ 관심사(IP) 조건문 ] : </b>";
+                echo json_encode($WHERE_contents_interest)."<br/>";
+            }
+
+			// 성별 통계
+			if($media_uinfo['male'] > $media_uinfo['female']) {
+                $arr_human_static_sex= array("m","");
+			} elseif($media_uinfo['male'] < $media_uinfo['female']) {
+                $arr_human_static_sex= array("f","");
+			} elseif($media_uinfo['male'] == $media_uinfo['female']) {
+                $arr_human_static_sex= array("m","f","");
+				if(mt_rand(0,1)==0){
+					$human_static_sex = "f";
+				} else {
+					$human_static_sex = "m";
+				}
+			}
+
+			// echo $human_static_sex."<br/>";
+			// 관심사 전체 설정
+        	if(mt_rand(0,1)==0){					
+				$WHERE_human_static_sex = array('human_static_sex'=>array('$in'=> array('m','f','')));
+			} else {
+				$WHERE_human_static_sex = array('human_static_sex'=>array('$in'=> $arr_human_static_sex));
+			}		   
+			$WHERE_interest = array_merge($WHERE_interest,$WHERE_human_static_sex);
+
+            if($test){
+                echo "<b>[ 성별(IP) 조건문 ] : </b>";
+                echo json_encode($WHERE_human_static_sex)."<br/>";
+            }
+
+			// 연령별 통계
+			$human_static_age_arr = array("a10"=>$media_uinfo['a10'],"a20"=>$media_uinfo['a20'],"a30"=>$media_uinfo['a30'],"a40"=>$media_uinfo['a40'],"a50"=>$media_uinfo['a50']);    
+			arsort($human_static_age_arr);
+			$for_count = 1; // 나올연령별 통계 수
+			foreach($human_static_age_arr as $age_key => $age_value){
+				if($for_count > 0) {
+					switch($age_key){
+						case 'a10':
+							$human_age = '1';
+							break;
+						case 'a20':
+							$human_age = '2';
+							break;
+						case 'a30':
+							$human_age = '3';
+							break;
+						case 'a40':
+							$human_age = '4';
+							break;
+						case 'a50':
+							$human_age = '5';
+							break;
+					}
+					$human_static_age .= $human_age.",";
+					$for_count--;
+				}
+			}
+			$human_static_age = substr($human_static_age, 0, strlen($human_static_age)-1);
+			
+			// 관심사 전체 설정
+        	if(mt_rand(0,1)==0){
+				$WHERE_human_static_age = array('human_static_age'=>array('$in'=> array('1','2','3','4','5','')));
+			} else {
+				$WHERE_human_static_age = array('human_static_age'=>array('$in'=> array($human_static_age,'')));
+			}
+			//$WHERE = array_merge($WHERE,$WHERE2);
+			$WHERE_interest = array_merge($WHERE_interest,$WHERE_human_static_age);
+            if($test){
+                echo "<b>[ 나이(IP) 조건문 ] : </b>";
+                echo json_encode($WHERE_human_static_age)."<br/>";
+            }
+        }else{
+            if($test){
+                echo "<b>[ 유저(IP) 인구통계 ] : </b>관심사 매칭 없음</b><br/>";
+            }
+        }
+    }
+
+    $info[qry] = $WHERE_interest;
+    $info[ad_interest] = $ad_interest;    
+    $info[sex] = $arr_human_static_sex;
+    $info[age] = $human_static_age;
+
+    return $info;
+}
+
+/* 전략 카운트 수 호출 fn_sg_cnt($qry) */
+function fn_sg_cnt($qry){
+    global $db_dsp;
+    $cnt = $db_dsp->dsp_ad_strategy->find($qry)->count();
+    return $cnt;
+}
+
+/* 전략 프리컨시 수 호출 fn_sg_frep_cnt($qry) */
+function fn_sg_frep_cnt($sg_idx){
+    global $db_dsp, $rpid, $adid;
+
+    if( $adid || $rpid ){
+        $tg_adid = ($adid) ? $adid : $rpid;
+    }
+
+    $media_app_redis = fn_app_sg_matching();
+    $media_app_redis -> select("15");
+    
+    // hashkey
+    $key_hash = "PREQ_SG:$tg_adid";
+    unset($sg_freq_cnt);
+    $sg_freq_cnt = $media_app_redis->hget($key_hash, $sg_idx);
+    //echo "{$key_hash},{$sg_idx} => {$sg_freq_cnt} <br>";
+
+    return $sg_freq_cnt;
+}
+
+/* 전략 단가/cpm 호출 fn_sg_cpay(쿼리) */
+function fn_sg_ecpm($qry){
+    
+    global $db_dsp, $media_info, $total_freq, $test;
+    $scate = $media_info['scate'];
+    $where_sg_idx 	= array("sg_idx" => 1, "bid_ecpm_m" => 1, "bid_cpay_m" => 1, "contents_idx" => 1, "retargeting_type" => 1, "targeting_check"=>1 );
+    $find_sg_cnt 	= $db_dsp->dsp_ad_strategy->count($qry);
+    $reject_cate 	= $media_info['reject_cate'];	// 거부카테고리
+    $arr_reject_cate = explode("|",$reject_cate);
+
+    if($find_sg_cnt == 0){
+        return "";
+    }
+    else{
+        $find_sg = $db_dsp->dsp_ad_strategy->find($qry, $where_sg_idx);
+        foreach ($find_sg as $find_data) {
+            $sg_idx = $find_data[sg_idx];                       // 전략번호
+            $sg_freq_cnt = fn_sg_frep_cnt($sg_idx);             // 전략번호 프리컨시
+            if($sg_freq_cnt > $total_freq) continue;        
+            $retargeting_type = $find_data[retargeting_type];   // 타게팅 타입
+            $targeting_check = $find_data[targeting_check];     // 타겟팅 체크
+            
+            // [ 최저단가 확인 ] ==========
+            if($find_data[bid_cpay_m][$scate] >= $media_info['cpay']) {
+                if($retargeting_type == 2 ){ // 쇼핑 타겟팅
+                    return $sg_idx;
+                }
+                else{   // 소재검증                    
+                    $qry = array("materials_gp" => $find_data[contents_idx], "aidx" => $media_info[isize], "code2" =>array('$nin' => $arr_reject_cate));
+                    if($test){
+                        echo "<br><b>[ 전략번호 ]</b> {$sg_idx} ===========================>";
+                        echo json_encode($qry);
+                    }
+                    $materials_cnt = $db_dsp->dsp_ad_materials->count($qry);
+                    // [ 소재유무 ] ==========
+                    if($materials_cnt > 0){
+                        $sg_cpm_info[$sg_idx] = $find_data[bid_ecpm_m][$scate];     // ecpm
+                    }
+                }
+            }
+        }
+
+        $sg_cnt = count($sg_cpm_info);
+        if($sg_cnt > 1 ){
+            $sum_cpm = array_values($sg_cpm_info); // 입찰가 전체 합계
+            foreach($sg_cpm_info as $key => $value){
+                $sg_idx = $key;
+            }
+            return $sg_idx;
+        }
+        else{
+            $sum_cpm = array_sum($sg_cpm_info); // 입찰가 전체 합계
+            foreach($sg_cpm_info as $key => $value){
+                $sg_cpm = ($value/$sum_cpm) *100;
+                $sg_cpm_info[$key] = $sg_cpm;
+            }
+            $sg_idx = weight_random($sg_cpm_info);
+            return $sg_idx;
+        }
+    }
+}
+
+/* 소재확인 fn_sg_info(전략번호) */
+function fn_sg_info($sg_idx){    
+    global $db_dsp, $media_info, $g_mcode, $areacode, $app_pattern, $interest_info, $scode, $package, $view_type, $adid, $rpid, $test;
+
+    //print_r(array_rand($interest_info[ad_interest]));
+    /*
+    === 노출/클릭을 위한 파라메터 ===
+     - 구분자 : 지면코드 | 전략번호 | 소재번호 | 단가 | 노출시간   | 타겟팅유무 | 타겟팅지역 |  타겟device | 타겟팅OS | 타겟display | 키워드 | 타겟팅유저광고관심사 | 유저 컨텐츠 관심사 |  인구통계타겟팅(성별) | 인구통계타겟팅(연령) | 유저아이디 | 캠페인 | 배너코드 | 노출형태(target) | 아이커버논타소진 
+
+     - 구분예 :    mcode | sg_idx   |       38 | 100  | 1460905200 | 1          |         11 |          0  |        0 |           0 |  test  |                  20  |                  0 |                     m |                   10 | badong     |      7 |        1 | 1                | 1 
+    */
+    // === 지면 / 전략 정보 ===
+    $reject_cate = $media_info['reject_cate'];	// 거부카테고리
+    $arr_reject_cate = explode("|",$reject_cate);
+
+    $mcode 	= $g_mcode;                      // === 0.지면코드 ===
+    $sg_idx = strval($sg_idx);              // === 1.전략번호 ===
+    $scate 	= $media_info['scate'];          // === 매체카테고리 ===
+    $isize 	= $media_info['isize'];
+    $where 	= array("sg_idx"=>$sg_idx);
+    $find_sg = $db_dsp->dsp_ad_strategy->find($where);
+
+    // === 전략정보 ===
+    foreach ($find_sg as $find_data) {
+        $uid       	= $find_data[uid];
+        $camp_idx   = $find_data[camp_idx];
+        $sg_idx     = $find_data[sg_idx];
+        $contents_idx = $find_data[contents_idx];
+        $bid_cpay   = $find_data[bid_cpay][$scate];
+        $bid_cpay_m = $find_data[bid_cpay_m][$scate];
+        $ad_interest        = $find_data[ad_interest][@array_rand($find_data[ad_interest])];
+        $contents_interest  = $find_data[contents_interest][@array_rand($find_data[contents_interest])];
+        $human_static_sex   = $find_data[human_static_sex][@array_rand($find_data[human_static_sex])];
+        $human_static_age   = $find_data[human_static_age][@array_rand($find_data[human_static_age])];
+        $target = $find_data[target];
+        $local  = $find_data[local];
+        $retargeting_type = $find_data[retargeting_type];
+        $local_chk  = ($local == "N" || $local[0] == "N" || identical_values( $local )) ? "N":"";
+        $shop_url   = $local = $find_data[shop_url];
+        $ad_type    = $find_data[ad_type];
+        $onair_stime    = $find_data[onair_stime];
+        $onair_etime    = $find_data[onair_etime];
+    }
+    // === 랜덤확인 ===
+    $rand_type = ($view_type == 'R') ? $retargeting_type : 0;
+    
+    // === 소재정보 ===
+    $qry_materials = array("materials_gp" => $contents_idx, "aidx" => $isize, "code2" =>array('$nin' => $arr_reject_cate));
+    if($test){
+        echo json_encode($qry_materials);
+    }
+    $where_materials = array("materials_idx"=>1, "imgURL"=>1);
+    $res_materials = $db_dsp->dsp_ad_materials->find($qry_materials, $where_materials);
+    foreach ($res_materials as $materials_data) {
+        $arr_item_idx[] = $materials_data[materials_idx];
+        $arr_item_url[] = $materials_data[imgURL];
+    }
+    $banner_idx = $arr_item_idx[array_rand($arr_item_idx, 1)];
+    $banner_url = $arr_item_url[array_rand($arr_item_idx, 1)];
+
+    // === 지면 / 전략 정보 ===
+    $arr_sg_info[0] = $g_mcode;                     // === 0.지면코드 ===
+    $arr_sg_info[1] = $sg_idx;                      // === 1.전략번호 ===
+    $arr_sg_info[2] = $banner_idx;                  // === 2.소재번호 === 
+    $arr_sg_info[3] = $bid_cpay_m;                  // === 3.단가 === 
+    $arr_sg_info[4] = time();                       // === 4.시간체크(1분내 노출을 체크) ===
+    // === 타켓팅 클릭 ===
+    $arr_sg_info[5] = $find_data[targeting_check];  // === 5.타겟팅유무 === 
+    $arr_sg_info[6] = $areacode;                    // === 6.타겟팅지역 === 
+    $arr_sg_info[7] = $app_pattern[device];         // === 7.타겟device === 
+    $arr_sg_info[8] = $app_pattern[os];             // === 8.타겟팅OS === 
+    $arr_sg_info[9] = $app_pattern[display];;       // === 9.타겟display === 
+    $arr_sg_info[10]    = "";                       // === 10.키워드 ===
+    $arr_sg_info[11]    = $ad_interest;             // === 11.타겟팅유저광고관심사 ===
+    $arr_sg_info[12]    = $contents_interest;       // === 12.유저 컨텐츠 관심사 ===
+    $arr_sg_info[13]    = $human_static_sex;        // === 13.인구통계타겟팅(성별) ===
+    $arr_sg_info[14]    = $human_static_age;        // === 14.인구통계타겟팅(연령) ===
+    $arr_sg_info[15]    = $uid;                     // === 15.유저아이디 ===
+    $arr_sg_info[16]    = $camp_idx;                // === 16.캠페인 ===
+    $arr_sg_info[17]    = $isize;                   // === 17.배너코드 ===
+    $arr_sg_info[18]    = $target;                  // === 18.노출형태(target) ===
+    $arr_sg_info[19]    = $scode;                   // === 19.신디케이션 코드(synd_code) ===
+    $arr_sg_info[20]    = 0;                        // === 20.케이큐브 지역검색 유무 (0/1) ===
+    $arr_sg_info[21]    = $local_chk;               // === 21.지역타겟팅 유무 (N) ===
+    $arr_sg_info[22]    = $retargeting_type;        // === 22.리타겟팅 타입 (0:선택안함/1:리타겟팅/2:쇼핑타겟팅) ===
+    $arr_sg_info[23]    = 0;                        // === 23.아이커버 소진 구분 (0:쇼핑,리타겟팅에서의 아이커버/1:리타겟팅/쇼핑타겟팅전략에서 예상모수없이 소진 되는 경우) ===
+    $arr_sg_info[24]    = 0;                        // === 24.비즈스프링 타겟팅 (0:no / 1:yes) ===
+    $arr_sg_info[25]    = $package;                 // === 25.리퍼러( 웹:url / 앱:pkgname ) ===
+    $arr_sg_info[26]    = $rand_type ;              // === 26.랜덤호출(0 : 일반호출 / 1 : 리타겟팅 랜덤호출 / 2 : 쇼핑타겟팅 랜덤호출) ===
+    $arr_sg_info[27]    = 0;                        // === 27.섹션호출(0 : 네이티브애드아님 / 1~ : 세션코드) ===
+    $arr_sg_info[28]    = $adid;                    // === 28.USER ADID ===
+    $arr_sg_info[29]    = $rpid;                    // === 29.PHONE ID===
+    
+    $set_param = implode("|",$arr_sg_info);
+    $set_param = urlencode(base64_encode($set_param));
+    $sg_info[info] = $arr_sg_info;
+    $sg_info[param] = $set_param;
+    $sg_info[imgurl] = $banner_url;
+    $sg_info[shop_url] = $shop_url;
+    $sg_info[ad_type]       = $ad_type;
+    $sg_info[onair_stime]   = $onair_stime;
+    $sg_info[onair_etime]   = $onair_etime;
+
+    return $sg_info;
+    /*
+    global $db_dsp, $media_info;
+    $qry = array("materials_gp" => $gp_no, "aidx" => $media_info[isize]);
+    //$where_sg_idx = array("materials_gp" => 1, "bid_ecpm_m" => 1, "bid_cpay_m" => 1, "contents_idx" => 1 );
+    echo $find_ad_materials_cnt = $db_dsp->dsp_ad_materials->count($qry, $where_sg_idx);
+    */
+}
+
+/* 가중치 적용하여 랜덤하게 뽑기 */
+function weight_random($weight_list) {
+    
+    if(count($weight_list) < 2){
+        $key = key($weight_list);
+        return $key;
+    }else{
+        $r = rand(1, array_sum($weight_list));
+        foreach($weight_list as $key => $value){		
+            $r -= $weight_list[$key];
+            if($r < 1) {
+                return $key;
+            }
+        }
+    }
+    return false;
+}
+
+// 지역 배열 비교
+function identical_values( $arrayLocal ) { 	
+	$local_internal_arr = array("11","26","27","28","29","30","31","36","41","42","43","44","45","46","47","48","50"); // 국내 비교
+	 if (!is_array($arrayLocal)) {
+	 	$arrayLocal = array($arrayLocal);
+	 }
+	sort( $arrayLocal ); 
+    sort( $local_internal_arr ); 
+    return $arrayLocal == $local_internal_arr; 
+} 
+
+function fn_materials_info($midx){
+    global $dbinfo;
+
+// 몽고 db 실서버 땐  수정 
+    $mongo_localhost = FALSE;
+    $mongo_info = $dbinfo['MONGODB_DSP_LOCALHOST'];
+    $connectionString = sprintf('mongodb://%s:%s@%s:%d',  $mongo_info[db_user], $mongo_info[db_passwd],  $mongo_info[db_host], $mongo_info[db_port]);
+
+    try {
+        $mongo_localhost = TRUE;
+        $conn_dsp = new MongoClient($connectionString);
+        $db_dsp = $conn_dsp->realdsp;
+    } catch (MongoConnectionException $e) {
+        if($test){//throw $e;
+            echo "mongo ".$mongo_info[db_host]." 오류(0)<br/>".$e."<br/>";}
+        $mongo_localhost = FALSE;
+    }
+
+    // === 소재정보 ===
+    $qry_imgurl = array("materials_idx" => $midx);
+    json_encode($qry_imgurl);
+    $where_imgurl = array("imgURL"=>1);
+    $res_imgurl = $db_dsp->dsp_ad_materials->find($qry_imgurl, $where_imgurl);
+    
+    foreach ($res_imgurl as $materials_data) {
+        $imgURL = $materials_data[imgURL];
+    }
+    return $imgURL;
+}
+
+// === 노출 카운트 ===  
+function fn_imp_count($get_param){
+    $http_host = explode('.', $_SERVER['HTTP_HOST']);
+    $server_ip =  $_SERVER['SERVER_ADDR'];
+
+    $url = "https://itg.realclick.co.kr/itg.rc?method=$get_param";      //호출대상 URL
+    $ch = curl_init(); //파라미터:url -선택사항
+   
+    curl_setopt($ch, CURLOPT_URL,$url); //여기선 url을 변수로
+	curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 1);
+	curl_setopt($ch, CURLOPT_TIMEOUT, 1);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_NOSIGNAL, 1);
+    
+    $data = curl_exec($ch);
+    $curl_errno = curl_errno($ch);
+    $curl_error = curl_error($ch);
+    
+    curl_close($ch);
+}
+
+// === 노출 카운트 ===  
+function fn_imp_count_test($get_param){
+    $http_host = explode('.', $_SERVER['HTTP_HOST']);
+    $server_ip =  $_SERVER['SERVER_ADDR'];
+
+    $url = "https://itgdev.realclick.co.kr/itg_check.rc?method=$get_param";      //호출대상 URL
+    $ch = curl_init(); //파라미터:url -선택사항
+   
+    curl_setopt($ch, CURLOPT_URL,$url); //여기선 url을 변수로
+	curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 1);
+	curl_setopt($ch, CURLOPT_TIMEOUT, 1);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_NOSIGNAL, 1);
+    
+    $data = curl_exec($ch);
+    $curl_errno = curl_errno($ch);
+    $curl_error = curl_error($ch);
+    
+    curl_close($ch);
+}
+
+
+// 심야시간 노출에 따른 허용 카테
+function filter_reject_cate(&$media_info_reject_cate, $media_info_allow_night_cate,$now_time){
+	global $test, $ALLOW_NIGHT_START_TIME, $ALLOW_NIGHT_END_TIME;
+	if($media_info_allow_night_cate!='' && ($now_time >= $ALLOW_NIGHT_START_TIME && $now_time < $ALLOW_NIGHT_END_TIME)){
+		if($test){
+			echo "원본 거부 매체 카테 : ".$media_info_reject_cate."</br>";
+			echo "원본 거부 매체 승인 카테 : ".$media_info_allow_night_cate."</br>";
+		}
+		if($media_info_reject_cate) { // 거부 카테고리가 있다면,
+			
+			$item_isize = explode("|",$media_info_reject_cate);			
+			$item_isize_ex = explode("|",$media_info_allow_night_cate); // 카테고리 추출
+			foreach($item_isize as $key=>$val)
+			{
+				foreach($item_isize_ex as $key_ex=>$val_ex)
+				{
+					if(strpos($item_isize[$key],$item_isize_ex[$key_ex]) !== false){// 카테고리  매칭.
+						unset($item_isize[$key]); // 거부 카테고리에 걸린 소재는 리스트에서 삭제
+					}
+				}
+			}
+			$item_isize = array_values($item_isize); // 재배열
+			$media_info_reject_cate = implode("|",$item_isize);	
+			if($test){
+				echo "원본 거부 매체 카테 2 : ".$media_info_reject_cate."</br>";
+			}
+		}
+	}
+}
+?>

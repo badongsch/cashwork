@@ -1,0 +1,284 @@
+<?php
+/********************************************************************************************/
+// 프로그램명        :  applink_1_media_info.rc
+// 설명              :  지면정보정보
+// 작성자            :  유동수
+// 작성일            :  2022.04.05
+// 수정일            :  
+// 프로그램 설명     :  지면정보정보
+// 처리절차          :  
+// 수정사항          :  
+/********************************************************************************************/
+if($test){
+    echo "
+    <table class='table table-condensed' style='padding: 0px;'>
+        <tbody><tr>
+            <th class='danger' colspan='8' style='text-align: center; font-size: large'><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 지면정보 - applink_1_media_info.rc >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        </th></tr>
+    </tbody></table>";
+}
+
+$media_redis->select($redis_info[db_db]);
+$g_mcode_table = $g_mcode."_info";
+
+$media_info 				= $media_redis->hgetall($g_mcode_table);
+$media_info['muid'] 		= $media_info['mid'];                                                               // === 매체아이디 ===
+$media_info['name'] 		= iconv("UTF-8","CP949",$media_info['name']);                                       // === 매체명 ===
+$media_info['sname'] 		= iconv("UTF-8","CP949",$media_info['sname']);                                      // === 지면명 ===
+$media_info['banner_effect']= $media_info['banner_effect']?strtoupper($media_info['banner_effect']):"Y";        // 배너효과 (Y:이용 | N:이용안해)
+$media_info['slot_cnt'] 	= $slot_cnt = $media_info['slot_cnt'];                                              // === 슬롯수 (텍스트) ===
+$media_info['cpmad'] 		= $media_info['cpmad']?$media_info['cpmad']:1;
+$media_info['chk_cpc_ad'] 	= $media_info['cpc_ad']?$media_info['cpc_ad']:"N";                  	// === CPC 가능 지면 확인 ===
+$media_info['chk_cpm_ad'] 	= $media_info['cpm_ad']?$media_info['cpm_ad']:"N";                  	// === CPM 가능 지면 확인 ===
+$media_info['popup_type']	= $media_info['popup_type']?$media_info['popup_type']:'';
+$media_info['mtype']		= $media_info['mtype']?$media_info['mtype']:0;
+$media_info['vtype']		= $media_info['vtype']?$media_info['vtype']:0;
+$media_info['scate']		= $media_info['scate']?$media_info['scate']:0;
+$media_info['cmpay']		= $media_info['cmpay']?$media_info['cmpay']:0;
+$media_info['cipay']		= $media_info['cipay']?$media_info['cipay']:0;
+$media_info['preo']			= $media_info['preo']?$media_info['preo']:0;	
+$media_info['repay']		= $media_info['repay']?$media_info['repay']:0;
+$media_info['allow_night_cate']	= $media_info['allow_night_cate']?$media_info['allow_night_cate']:'';
+$media_info['cpp_slot']		= $media_info['cpp_slot']?$media_info['cpp_slot']:0;
+$media_info['frequency_cnt']= 2;
+$media_info['passback']		= '';
+$media_info['ad_size'] 		= $media_info['ad_size']?$media_info['ad_size']:0;			// === 원사이즈 ===
+if($slot_cnt == "" || $slot_cnt == 0){
+	$slot_cnt = 1;
+}
+
+if($media_info['muid'] == ""){
+	$errno_app = 6;	// 지면정보 없음
+}
+
+if($errno_app == ''){
+    // 몽고 db 실서버 땐  수정 
+    $app_mongo_info = $dbinfo['MONGODB_DSP_LOCALHOST'];	
+    $app_connectionString = sprintf('mongodb://%s:%s@%s:%d',  $app_mongo_info[db_user], $app_mongo_info[db_passwd],  $app_mongo_info[db_host], $app_mongo_info[db_port]);
+    if($test){echo "mongo : ".$app_mongo_info[db_host]." - localhost <br/>";}
+    try {		
+        $app_mongo_err = TRUE;
+        $app_conn_dsp = new MongoClient($app_connectionString);
+        $app_db_dsp = $app_conn_dsp->realdsp;
+    } catch (MongoConnectionException $e) {
+        if($test){//throw $e;
+            echo "mongo ".$app_mongo_info[db_host]." 오류(0)<br/>".$e."<br/>";
+        }
+        $app_mongo_err = FALSE;
+    }
+
+    if($test){
+        echo "<b> [ 매체명(매체코드) - name(muid) ] : </b>{$media_info['name']}({$media_info['muid']})</br>";
+        echo "<b> [ 지면명(지면코드) - sname(g_mcode) ] : </b>{$media_info['sname']}($g_mcode)</br>";
+        echo "<b> [ 배너타입 - vtype ] : </b>{$media_info['vtype']}</br>";
+        echo "<b> [ 배너사이즈- ad_size ] : </b>{$media_info['ad_size']}</br>";
+        echo "<b>[ 배너사이즈 - isize ]</b>: {$media_info['isize']}<br/>";
+        echo "<b> [ 프리미엄 - premium ] : </b>{$media_info['premium']}</br>";
+        echo "<b> [ 카테고리 - scate ] : </b>{$media_info['scate']}</br>";
+        echo "<b> [ 최저단가 - cpay ] : </b>{$media_info['cpay']}</br>";
+        echo "<b> [ cpc광고 노출 - cpc_ad ] : </b>{$media_info['cpc_ad']}</br>";
+        echo "<b> [ cpm광고 노출 - cpm_ad ] : </b>{$media_info['cpm_ad']}</br>";
+    }
+
+    $WHERE = array();           // 타겟팅(X)
+    $WHERE_targeting = array(); // 타겟티(O)
+
+    // [거부전략확인] ==========
+    if($media_info['premium'] == "Y"){
+        $WHERE_bid_type = array('bid_type_m'=>'9');
+    }
+    else{
+        $WHERE_bid_type = array('bid_type_m'=>$media_info['scate']);
+    }
+    $WHERE_targeting = array_merge($WHERE_targeting,$WHERE_bid_type);
+
+    // [거부전략확인] ==========
+    if($media_info['reject_sg'] != ''){
+        filter_reject_sgidx($media_info['reject_sg'], $app_db_dsp);
+        $rej_sg_arr = explode(",",$media_info['reject_sg']);
+        $WHERE_reject_sg = array("sg_idx" => array('$nin'=> $rej_sg_arr));
+        if($test){
+            echo "<b> [ 원본 거부 전략 ] </b>: ".$media_info['reject_sg']."<br/>";
+            echo "<b> [ 거부 전략 필터(종료삭제) ] </b>: ".$media_info['reject_sg']."</br>";        
+        }
+    }
+    $WHERE = array_merge($WHERE,$WHERE_reject_sg);
+    $WHERE_targeting = array_merge($WHERE_targeting,$WHERE_reject_sg);
+
+    if($media_info['allow_night_cate'] != ''){
+        if(($now_time >= $ALLOW_NIGHT_START_TIME && $now_time < $ALLOW_NIGHT_END_TIME)){		
+            if($test){
+                echo "<b>[ 심야 노출 ]</b>: 허용, 허용시간<br/>";
+            }
+            // 심야시간 노출에 따른 허용 카테
+            filter_reject_cate($media_info['reject_cate'], $media_info['allow_night_cate'],$now_time);
+
+        } else {
+            if($test){
+                echo "<b>[ 심야 노출 ]</b>: 허용, 금지시간<br/>";
+                echo "<b>[ 거부카테고리 ]</b>: {$media_info['reject_cate']}<br>";
+            }
+        }
+    } else {
+        if($test){
+            echo "<b>[ 심야 노출 ]</b>: 금지<br/>";
+            echo "<b>[ 거부카테고리 ]</b>: {$media_info['reject_cate']}<br>";
+        }
+    }
+
+    // [배너사이즈 확인] ==========
+    $WHERE_kind_idx  = array("kind_idx" => $media_info['isize']);
+    $WHERE = array_merge($WHERE,$WHERE_kind_idx);
+    $WHERE_targeting = array_merge($WHERE_targeting,$WHERE_kind_idx);
+
+    // [날씨/앱/타겟팅 제외 확인] ==========
+    $WHERE_ad_type = array("ad_type" => array('$nin' => array("4","5")));
+    $WHERE = array_merge($WHERE,$WHERE_ad_type);
+    $WHERE_targeting = array_merge($WHERE_targeting,$WHERE_ad_type);
+
+    // [CPC/CPM 확인] ==========
+    $arr_target[]= ( $media_info['cpc_ad'] == 'Y') ? strval(0):"";
+    $arr_target[]= ( $media_info['cpm_ad'] == 'Y') ? strval(1):"";
+
+    $WHERE_target = array('target'=>array('$in'=> $arr_target));
+    $WHERE = array_merge($WHERE,$WHERE_target);
+    $WHERE_targeting = array_merge($WHERE_targeting,$WHERE_target);
+
+    // [광고시작일 확인] ==========
+    $WHERE_startdate = array("startdate" => array('$lt' =>  "$now_T"));
+    $WHERE = array_merge($WHERE,$WHERE_startdate);
+    $WHERE_targeting = array_merge($WHERE_targeting,$WHERE_startdate);
+
+    // [광고종료일 확인] ==========
+    $max_enddate = time();
+    $max_enddate = strtotime(date('Y-m-d 0:0:0', $max_enddate));
+    $WHERE_enddate =array('$or' => array(array("enddate" => "0"), array("enddate" => array('$gte' => "$max_enddate" ))));
+    $WHERE = array_merge($WHERE,$WHERE_enddate);
+    $WHERE_targeting = array_merge($WHERE_targeting,$WHERE_enddate);
+
+    // [일자/시간 확인] ==========
+    $WHERE_tg_day = array('$and' => array(array("tg_day.tg".$now_day => array('$exists'=>true)), array("tg_day.tg".$now_day => array('$in'=> array($now_time))) ));
+    $WHERE_targeting = array_merge($WHERE_targeting,$WHERE_tg_day);
+
+    // [지역 확인] ==========
+    $arr_fn_kcube = fn_kcube();
+    $areacode_ori = $arr_fn_kcube[areacode_ori];
+    $kcube_cookie = $arr_fn_kcube[kcube_cookie];
+    $areacode = $areacode_ori;
+    $areacode_top = substr($areacode_ori,0,2);
+    $areacode_internal = substr($areacode_ori,0,4);
+    $areacode_oversea = substr($areacode_ori,0,5);
+    $WHERE_local = array('local'=>array('$in'=> array($areacode_internal,$areacode_oversea,$areacode_top,'','N')));
+    $WHERE_targeting = array_merge($WHERE_targeting,$WHERE_local);
+
+    // [기기 타겟팅] ==========
+    if($test){
+        echo "<b>[ 매체 유형(mtype) ] (0:PC_Web/1:M_Web/2:안드로이드/3:IOS/4:기타) : </b>".$media_info['mtype']." - ";
+    }
+    $app_pattern = fn_device($u);   // 기기 유형 가져오기
+    $app_user_mtype = $app_pattern[app_user_mtype]; // 유저기기
+
+    $IS_APP = true;
+
+    if($app_user_mtype == 0 || $media_info['mtype'] == 0 ){
+        $errno_app = 3;
+        $IS_APP = false;
+        if($test){
+            echo "<b>PC 매체 이거나 현재 PC 접속 입니다.</b>";
+        }
+    }
+
+    if($media_info['mtype'] == '1' || $media_info['mtype'] == '2' || $media_info['mtype'] == '3'){
+        $app_user_mtype = 5;
+    }
+
+    $app_pattern[device];  // device
+    $app_pattern[os];      // os
+    $app_pattern[display]; // display
+
+    switch($app_user_mtype){
+        case 0: // pc
+            $WHERE_technic = array_merge(array('technic_device'=>array('$in'=> array('0',''))) );		//,'1'	,array('target'=>array('$in'=> array('0')))
+            break;
+        case 1: // mobile web
+            $WHERE_technic = array_merge(array('technic_device'=>array('$in'=> array('1',''))),array('technic_os'=>array('$in'=> array('3',''))),array('technic_display'=>array('$in'=> array('2',''))) );
+            break;
+        case 2: // mobile android
+            $WHERE_technic = array_merge(array('technic_device'=>array('$in'=> array('1',''))),array('technic_os'=>array('$in'=> array('1',''))),array('technic_display'=>array('$in'=> array('2',''))) );
+            break;
+        case 3: // apple
+            $WHERE_technic = array_merge(array('technic_device'=>array('$in'=> array('1',''))),array('technic_os'=>array('$in'=> array('2',''))),array('technic_display'=>array('$in'=> array('2',''))) );
+            break;
+        case 4: // mobile other
+            $WHERE_technic = array_merge(array('technic_device'=>array('$in'=> array('1',''))),array('technic_os'=>array('$in'=> array('3',''))),array('technic_display'=>array('$in'=> array('2',''))) );
+            break;
+        case 5: // App
+            $WHERE_technic = array_merge(array('technic_device'=>array('$in'=> array('1',''))),array('technic_display'=>array('$in'=> array('1',''))) );
+            break;
+        default : // defult
+            $WHERE_technic = array_merge(array('technic_device'=>array('$in'=> array('1',''))),array('technic_os'=>array('$in'=> array('3',''))),array('technic_display'=>array('$in'=> array('1','2',''))) );
+    }
+    $WHERE_targeting = array_merge($WHERE_targeting,$WHERE_technic);
+
+    // [ 노출형태 타겟팅 ] ==========
+    switch($media_info['vtype']){
+        case 0:     // PC
+        case 2:     // 토스트
+        case 50:    // mobile : 고정
+        case 52:    // mobile : 스크롤
+        case 53:    // mobile : 애드체인지
+        case 6:		// 전광판
+        case 57:	// mobile : 전광판
+            $WHERE_form = array('form'=>array('$in'=> array('0',''))); // array('form'=>'0');
+            break;		
+        case 7:		// 큐브 
+            $WHERE_form = array('form'=>array('$in'=> array('0','1','')));
+            break;
+        case 1:     // 플로팅
+        case 3:     // 확장
+        case 10:    // 새플로팅
+        case 51:    // mobile : 플로팅
+        case 55:    // mobile : 확장
+        case 56:	// 슬라이딩
+            $WHERE_form = array('form'=>array('$in'=> array('1',''))); // array('form'=>'1');
+            break;
+        case 4:     // 하단빅배너
+            if($media_info['isize'] == "14"){
+                $WHERE_form = array('form'=>array('$in'=> array('0','3','')));
+            } else {
+                $WHERE_form = array('form'=>array('$in'=> array('3','')));
+            }
+            break;
+        case 5:     // 아이커버
+        case 54:    // 아이커버
+            $WHERE_form = array('form'=>array('$in'=> array('2',''))); // array('form'=>'2');
+            break;
+        case 9:     // 탭AD
+            $WHERE_form = array('form'=>array('$in'=> array('4','')));
+            break;
+    }
+    $WHERE_targeting = array_merge($WHERE_targeting,$WHERE_form);
+
+    if($test){
+        echo "<b> [ <span style='color:red'>(기본)</span>거부 전략 필터 조건문 ] </b>: ".json_encode($WHERE_reject_sg)."</br>";
+        echo "<b> [ <span style='color:red'>(기본)</span>배너사이즈 조건문 ]</b>: ".json_encode($WHERE_kind_idx)."<br/>";
+        echo "<b> [ <span style='color:red'>(기본)</span>날씨/앱/ 타겟팅 제외 조건문 ] :</b>".json_encode($WHERE_ad_type)."<br>";
+        echo "<b> [ <span style='color:red'>(기본)</span>타겟타입(CPC) 조건문 ] : </b>".json_encode($WHERE_target)."<br>";
+        echo "<b> [ <span style='color:red'>(기본)</span>시작일자 조건문 ] : </b>".json_encode($WHERE_startdate)."<br>";
+        echo "<b> [ <span style='color:red'>(기본)</span>종료일자 조건문 ] : </b>".json_encode($WHERE_enddate)."<br>";
+        echo "<b> [ <span style='color:blue'>(타겟팅)</span>카테고리 조건문 ] </b>: ".json_encode($WHERE_bid_type)."</br>";
+        echo "<b> [ <span style='color:blue'>(타겟팅)</span>요일/시간 조건문 ] : </b>".json_encode($WHERE_tg_day)."<br>";
+        echo "<b> [ <span style='color:blue'>(타겟팅)</span>지역 타겟팅 조건문 ] : </b>".json_encode($WHERE_local)."<br>";
+        echo "<b> [ <span style='color:blue'>(타겟팅)</span>디바이스 조건문 ] : </b>".json_encode($WHERE_technic)."<br/> ";
+        echo "<b> [ <span style='color:blue'>(타겟팅)</span>노출형태 조건문 ] : </b>".json_encode($WHERE_form)."<br/> ";
+    }
+
+    // [여기까지의 쿼리] ==========
+    if($test){
+        echo "<b>[*] 여기까지의 논타겟팅 조건문 (WHERE): </b>".json_encode($WHERE)."<br>";
+        echo "<b>[*] 여기까지의 타겟팅 조건문 (WHERE_targeting): </b>".json_encode($WHERE_targeting)."<br>";
+    }
+}
+
+$media_redis->close();
+?>

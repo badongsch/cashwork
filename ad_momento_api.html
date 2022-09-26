@@ -1,0 +1,265 @@
+<?
+$headers = apache_request_headers();
+
+if(strpos($headers["Content-Type"], "json") !== false){
+    $headers = apache_request_headers();
+    header("Content-Type: application/json; charset=euc-kr");
+    header("x-openrtb-version: 2.3");
+    header("Access-Control-Allow-Origin: *");
+}
+
+// **********************************************************************************************************
+// ===========================================   공통함수로드   =============================================
+// **********************************************************************************************************
+include_once('./inc/common_func.php');
+include_once('./inc/media_class.php');
+// **********************************************************************************************************
+// ===========================================   API 광고호출   =============================================
+// **********************************************************************************************************
+
+// **********************************************************************************************************
+// =============================================   변수셋팅   ===============================================
+// **********************************************************************************************************
+// 각 변수 초기화
+$ad_html      = '';                 // 광고 출력 HTML
+$output_html  = '';                 // 헤더와 푸터가 더해진 최종 광고 출력 HTML
+//$ip = $_SERVER["REMOTE_ADDR"];
+
+// 결과코드 초기화
+$resultcode = '';
+
+// HTTPS 체크
+$request_scheme = 'http';
+$request_port = '';
+
+// 패스백 주소
+$passback_url = $NW_URL;
+
+/*
+user.ext.uid: 폰아이디
+app.bundle: 앱 패키지
+device.ifa: 광고아이디
+device.ua: 유저 Agent
+device.ip: 유저 IP
+imp[0].tagid: 지면코드 (현재 모멘토는 멀티 비딩을 지원하지 않으므로 항상 imp의 첫번째 값을 사용하시면 됩니다)
+*/
+
+// wow 입력시 테스트(Get  방식)
+if(strpos($headers["Content-Type"], "json") !== false){
+    $data = json_decode(file_get_contents('php://input'), true);
+}
+else{
+    $data = ($_GET);
+    $test = $data[wow];
+}
+if ( isset($data['user']) ) {
+	$user = $data['user'];
+	$rpid = $user['ext']['uid'];	//폰아이디
+}
+if ( isset($data['app']) ) {
+	$app = $data['app'];
+	$rpkgname = $app['bundle'];		//앱 패키지
+}
+
+if ( isset($data['device']) ) {
+	$device = $data['device'];
+	$radid = $device['ifa'];		//광고아이디
+	$ua = $device['ua'];			//User Agent
+    $ip = $device['ip'];			//User IP
+    If($ip == ''){
+        $ip = $_SERVER["REMOTE_ADDR"];
+    }
+}
+
+if ( isset($data['imp']) ) {
+	$imp = $data['imp'];
+
+    // [캐시워크] 지면코드 말고 별도 코드 매칭 처리 
+    $arr_imp_mcode = array('d12b5591-fb45-4c7d-be75-79b7e91452da', 'df0aa1f4-0b8c-484e-9891-8cc65e549e88'); 
+
+    // [캐시워크 지면] ==========
+    if(in_array($imp[0]['tagid'], $arr_imp_mcode)){
+        // 320x50
+        if($imp[0]['tagid']=='d12b5591-fb45-4c7d-be75-79b7e91452da') {
+            $mcode = 'momento00001_36573';
+        }
+        // 320x100
+        if($imp[0]['tagid']=='df0aa1f4-0b8c-484e-9891-8cc65e549e88') {
+            $mcode = 'momento00001_36543';
+        }
+    }
+    // [일반 지면] ==========
+    else{
+        $mcode = $imp[0]['tagid'];
+    }
+}
+
+// **********************************************************************************************************
+// =============================================   출력함수   ===============================================
+// **********************************************************************************************************
+function api_output($resultcode=0, $reason='', $size='', $impurl='', $link='', $ad_html='') {
+    global $otype, $m_info, $mcode;
+
+    $res = '';
+	$res['resultcode']  = $resultcode;
+	if ( $reason != '' ) {
+		$res['reason']	= $reason;
+	} else {
+		$res['adhtml']	= $ad_html;		//$ad_html;
+	}
+
+    If ($impurl !== '' ){
+        $res['impurl']	= $impurl; 		//$impurl;
+    }
+	echo json_encode($res, JSON_UNESCAPED_UNICODE);
+}
+
+// **********************************************************************************************************
+// ============================================  파라메터 체크  =============================================
+// **********************************************************************************************************
+if(preg_match("/[^a-zA-Z0-9_-]+/",$mcode) || !$mcode) {
+    //api_output(2, "잘못된 호출입니다.");
+    api_output(2, "A required media code(mcode) value is missing."); 
+    exit;
+}
+
+// [잘못된 값 처리]
+$radid = str_replace("00000000-0000-0000-0000-000000000000", "", $radid);
+if(!$radid && !$rpid) {
+    //api_output(2, "필수값이 누락되었습니다.");
+    api_output(2, "A required ADID/PHONEID value is missing.");
+    exit;
+}
+
+// **********************************************************************************************************
+// ==========================================   지면정보 로드   =============================================
+// **********************************************************************************************************
+// 미디어 클래스 생성
+$media = new media($mcode);
+
+// 블록킹 아이피 체크
+$block_ip = $media->blockUserChk();
+
+// 지면정보 로드
+$m_info = $media->getMediaInfo();
+
+if(!$m_info['mid'] || ($m_info['svc_stat'] != '' && $m_info['svc_stat'] != 1)) {
+    //api_output(1, "지면코드가 유효하지 않습니다.");
+    api_output(1, "Media code(mcode) is invalid.");    
+    exit;
+}
+
+// **********************************************************************************************************
+// =====================================   네트워크사 노출순위 계산   =======================================
+// **********************************************************************************************************
+$net_index = $media->getMediaNetIndex();
+
+// **********************************************************************************************************
+// =============================================   기타처리   ===============================================
+// **********************************************************************************************************
+$net_no = 0;
+// 최초 req 수집 (네트워크사별 req 수집은 sum 할 시 imp와 비교할 수 없으므로 최초 req를 별도 수집, 패스백이 아닐 때)
+if($back_net == '') {
+	$media->incrNetRequest('default');
+	$media->appt($_SERVER['REQUEST_URI']); //test
+}
+
+// 네트워크사 노출순위가 있으면 광고로직 동작
+if($ad_html == '' && count($net_index) > 0) {
+	// 계산된 노출순위대로 광고를 호출
+	foreach($net_index as $idx => $net_id) {
+		// 패스백 시에는 net_no 이전까지의 네트워크사를 스킵한다.
+		if($idx >= $net_no) {
+			switch($net_id) {
+				// 리얼DSP
+				case 'real_dsp_mb':
+					$block_ip = $media->getNetworkBlockPer($net_id,$block_ip);
+					if(!$block_ip) {
+						$dsp_call = false;
+						$rand_no = rand(0, 100);
+						if($m_info['cpmad'] == 1) {
+							$dsp_call = true;
+						}
+						else {
+							$dsp_freq = $media->getDspFreq(); // 전체 호출 빈도율을 가져옴
+							if($rand_no <= $dsp_freq['total']) {
+								$dsp_call = true;
+							}
+						}
+						if($dsp_call) {
+                            $media->incrNetRequest($net_id);
+
+							$postData = array("m"=>$mcode, "rpid"=>$rpid, "rpkgname"=>$rpkgname, "radid"=>$radid, "u"=> $ua, "wow"=> $test);
+                            $postData = json_encode($postData);
+                            If($test){
+                                echo "<b>[ ad_momento_api param ]</b> - ".$postData."<br>";
+                            }
+							//$dsp_adurl = $request_scheme.'://realdsp.realclick.co.kr'.$request_port.'/real_ad_dsp_app.html?gmcode='.base64_encode($mcode);
+							//$dsp_adurl = "https://realdsp78.realclick.co.kr/real_ad_dsp_applink.html";
+                            $dsp_adurl = "https://realdsp.realclick.co.kr/app_api/real_ad_dsp_applink.rc";
+
+							$ch = curl_init();
+							$timeout = 1;
+							curl_setopt ($ch, CURLOPT_URL, $dsp_adurl);
+							curl_setopt ($ch, CURLOPT_USERAGENT, $_SERVER['HTTP_USER_AGENT']);
+							curl_setopt ($ch, CURLOPT_RETURNTRANSFER, 1);
+							curl_setopt ($ch, CURLOPT_CONNECTTIMEOUT, $timeout);
+							curl_setopt ($ch, CURLOPT_TIMEOUT, $timeout);
+							curl_setopt ($ch, CURLOPT_POSTFIELDS, $postData);
+                            curl_setopt( $ch, CURLOPT_HTTPHEADER, array("REMOTE_ADDR: $ip", "HTTP_X_FORWARDED_FOR: $ip"));
+							$dsp_result = curl_exec($ch);
+							$dsp_info = curl_getinfo($ch);
+							curl_close($ch);
+                            
+                            if(strpos($headers["Content-Type"], "json") !== false){
+                                $dsp_json = json_decode($dsp_result, true);
+                                if($dsp_json[resultcode] == 200 && $dsp_json[adhtml] != "") {
+                                    api_output(200, '', $m_info['media_width']."x".$m_info['media_height'], $dsp_json['impurl'], $dsp_json['adlink'], $dsp_json['adhtml']);
+                                    $arr_dsp_json[0]=$dsp_json;
+                                    freq_cookie_process($arr_dsp_json);
+                                    exit;
+                                }
+                            }
+                            else{
+                                echo $dsp_result;
+                                exit;
+                            }
+						}
+					}
+					break;
+				// 광고없음(패스백URL이 있다면 패스백 없으면 공백처리)
+				default:
+					$resultcode = 0;
+					//$reason = "광고가 존재하지 않습니다.";
+                    $reason = "Ads do not exist";
+					$media->incrNetRequest('blank');
+					break;
+			}
+		}
+
+		// 광고가 채워지면 광고호출 루프 탈출
+		if($ad_html) break;
+	}
+}
+else {
+	$resultcode = 0;
+	//$reason = "광고가 존재하지 않습니다.";
+    $reason = "Ads do not exist";
+	$media->incrNetRequest('blank');
+}
+
+
+if(!$ad_html) {
+    $resultcode = 0;
+    //$reason = "광고가 존재하지 않습니다.";
+    $reason = "Ads do not exist";
+}
+
+// **********************************************************************************************************
+// =============================================   광고출력   ===============================================
+// **********************************************************************************************************
+api_output($resultcode, $reason);
+
+// 지면DB 접속종료
+$media->close();
+?>

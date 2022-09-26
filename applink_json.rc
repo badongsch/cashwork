@@ -1,0 +1,76 @@
+<?
+/********************************************************************************************/
+// 프로그램명        :  applink_json.rc
+// 설명              :  JSON 출력
+// 작성자            :  유동수
+// 작성일            :  2022.05.03
+// 수정일            :  
+// 프로그램 설명     :  광고정보를 json으로 출력한다.
+// 처리절차          :  
+// 수정사항          :  
+/********************************************************************************************/
+if($test){
+    echo "
+    <table class='table table-condensed' style='padding: 0px;'>
+        <tbody><tr>
+            <th class='danger' colspan='8' style='text-align: center; font-size: large'><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< JSON 출력 - applink_json.rc >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        </th></tr>
+    </tbody></table>";
+}
+
+if($errno_app == 0){
+	if($helloworld){
+		$txt = $app_pattern['device'].",".$app_pattern['display'].",".$app_pattern['os'].",".$vi.",".$app_useragent;
+	} else {
+		$txt = "";
+	}
+
+    $data = array(
+        "resultcode" => 200,
+        "adhtml" => "{$iframe}",
+        "reason" => "OK"
+	);
+
+    // momento00001_36543 / momento00001_36573 / wotjr711200003_36408 - 캐시워크 별도 노출 체크
+    if(in_array($g_mcode, $arr_imgurl)){
+        $impurl = $sdk_imp_url;
+        $data[impurl] = "{$impurl}";
+        fn_imp_count_test($set_param);
+    }
+    else{
+        fn_imp_count($set_param);    
+    }
+} else {
+	if($helloworld){
+		$txt = $app_pattern['device'].",".$app_pattern['display'].",".$app_pattern['os'].",".$vi.",".$app_useragent.", error_app : ".$errno_app;
+	} else {
+		$txt = "";
+	}
+	switch($errno_app){
+		case 1:
+		case 2:
+			$errcode = 2;
+			$reason = "It's a parameter problem.";
+			break;
+		case 3:
+		case 4:
+		case 5:
+		case 7:
+			$errcode = 0;
+			$reason = "No ads.";
+			break;
+		case 6:
+			$errcode = 1;
+			$reason = "Media code(mcode) is invalid.";
+			break;		
+	}
+	$data = array(
+			"resultcode" => $errcode,
+			"adhtml" => "",
+			"reason" => $reason.",".$txt,
+			"sg_freq"=>$app_sg_freq
+	);
+}
+
+echo json_encode($data, JSON_UNESCAPED_UNICODE);
+?>

@@ -1,0 +1,109 @@
+<?php
+/********************************************************************************************/
+// 프로그램명        :  applink_3_ad_info.rc
+// 설명              :  전략 정보
+// 작성자            :  류동수
+// 작성일            :  2022.04.05
+// 수정일            :  
+// 프로그램 설명     :  전략 정보
+// 처리절차          :  
+// 수정사항          :  
+/********************************************************************************************/
+if($test){
+    echo "
+    <table class='table table-condensed' style='padding: 0px;'>
+        <tbody><tr>
+            <th class='danger' colspan='8' style='text-align: center; font-size: large'><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 전략 정보 - applink_3_ad_info.rc >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        </th></tr>
+    </tbody></table>";
+}
+// === 파라메터 정보 ===
+$app_keys = 0; 			// 전략 번호
+$app_sel_arr = array(); // 선택된 광고의 정보
+
+// 전략없음
+if($view_type != "SRT" && $view_type != "RT" && $view_type != "T" && $view_type != "R" && $view_type != "R"){
+    $errno_app = "7";
+}
+// 전략있음
+else{
+    $errno_app = "0";
+
+    foreach($arr_sg_idx_list as $key=>$val){
+        $sg_idx = $key;
+        $str_goods = $val; // 쇼핑 타겟팅용
+    }
+
+    $sg_info = fn_sg_info($sg_idx);
+    $arr_sg_info = $sg_info[info];  // 전략정보
+    $set_param  = $sg_info[param];  // 클릭파라메터
+    $img_url    = $sg_info[imgurl]; // 이미지url
+    
+
+    $arr_ad_size = explode("x",$media_info['ad_size']);
+    $bimg_w = $arr_ad_size[0];
+    $bimg_h = $arr_ad_size[1];
+
+    $host_name = php_uname('n');
+    $sdk_imp_url = $realdsp_imp_url."method=".$set_param."&t_mcode={$g_mcode}&hname={$host_name}";
+    $sdk_adr_url = $realdsp_click_url."method=".$set_param;
+    $sdk_img_url = $realdsp_img.$img_url;
+    
+    if($view_type == 'SRT'){
+        $shop_url   = $sg_info[shop_url]; // shop_url(쇼핑타겟팅)
+        //$shop_url = urlencode(base64_encode($shop_url));
+
+        $param = base64_encode($set_param);
+        $shop_url = base64_encode($shop_url);
+    
+        $realdsp_url = "https://realdsp.realclick.co.kr";
+        $iframe = "{$realdsp_url}/sp_view/sp/view/display_simple_m2.php?param={$param}&meth={$g_mcode}&width={$bimg_w}&height={$bimg_h}&sg_idx={$sg_idx}&sg_goods={$str_goods}&sel_shop_tpl_type=2&murl={$shop_url}";
+
+        //"{$realdsp_url}/sp_view/sp/view/display_simple_m.php?&meth={$g_mcode}&width={$bimg_w}&height={$bimg_h}&sg_idx={$sg_idx}&sg_goods={$str_goods}&sel_shop_tpl_type=2&rurl={$sdk_adr_url}&murl={$shop_url}";
+        //"https://realdsp78.realclick.co.kr:444/sp_view/sp/view/display_simple.php?meth=wotjr711200001_1572&width=200&height=200&sg_idx=9628&sg_goods=[2027122,1725379]&type=RTBDSP&stg_rand=&sel_shop_tpl_type=2&rurl=aHR0cHM6Ly9yZWFsYWRyLnJlYWxjbGljay5jby5rci9kc3AvP21ldGhvZD1kMjkwYW5JM01URXlNREF3TURGZk1UVTNNbnc1TmpJM2ZEZ3pOVEF5ZkRNd01Id3hOalV4TVRNek9UUTJmREY4TVRFeU1Id3dmREI4TUh4OE9EQXhmSHh0ZkROOGJHWnVaWFIzYjNKcmMzd3lOVEl4ZkRNeWZEQjhmREI4VG53eWZEQjhNSHhvZEhSd09pOHZZbUZrYjI1bmMyTm9NaTVqWVdabE1qUXVZMjl0ZkRCOE1BJTNEJTNE&murl=aHR0cDovL3d3dy5sZnNxdWFyZS5jb20v";
+        if($test) {
+            echo "<b>[1] 이미지 사이즈 : </b>{$media_info['isize']}<br/>";
+            echo "<b>[2] 이미지 URL : </b>{$sdk_img_url}<br/>";
+            echo "<b>[3] 광고주 도메인 : </b>{$shop_url}<br/>";
+            echo "<b>[4] 클릭 카운트 URL : </b>{$sdk_adr_url}<br/>";
+            echo "<b>[5] 노출 카운트 URL : </b>{$sdk_imp_url}<br/>";
+            echo "<b>[6] iframe URL : </b>{$iframe}<br/>";
+        }
+    }
+    else{
+        // [ 테스트 서버 체크 ] ==========
+        $http_host = explode('.', $_SERVER['HTTP_HOST']);
+        if(strpos($http_host[0], 'dev') > 0) {
+            $dev_txt =  "dev";
+        }
+        $realdsp_url = "https://realdsp{$dev_txt}.realclick.co.kr";
+        
+        $ad_type        = $sg_info[ad_type];
+        $onair_stime    = $sg_info[onair_stime];
+        $onair_etime    = $sg_info[onair_etime];
+
+        // [ 라이브 배너 ] ==========
+        if($ad_type == 7 && $onair_etime-time() > 0){
+            $iframe = "{$realdsp_url}/live_view/view/display_simple_app.php?method={$set_param}&width={$bimg_w}&height={$bimg_h}";
+            if($test) {
+                echo "<b>[1] 이미지 사이즈 : </b>{$media_info['isize']}<br/>";
+                echo "<b>[2] 이미지 URL : </b>{$sdk_img_url}<br/>";
+                echo "<b>[3] 클릭 카운트 URL : </b>{$sdk_adr_url}<br/>";
+                echo "<b>[4] 노출 카운트 URL : </b>{$sdk_imp_url}<br/>";
+                echo "<b>[5] iframe URL : </b>{$iframe}<br/>";
+            }
+        }
+        // [ 일반 배너 ] ==========
+        else{
+            $iframe = "{$realdsp_url}/app_api/applink_4_view_info.rc?param={$set_param}&width={$bimg_w}&height={$bimg_h}";
+            if($test) {
+                echo "<b>[1] 이미지 사이즈 : </b>{$media_info['isize']}<br/>";
+                echo "<b>[2] 이미지 URL : </b>{$sdk_img_url}<br/>";
+                echo "<b>[3] 클릭 카운트 URL : </b>{$sdk_adr_url}<br/>";
+                echo "<b>[4] 노출 카운트 URL : </b>{$sdk_imp_url}<br/>";
+                echo "<b>[5] iframe URL : </b>{$iframe}<br/>";
+            }
+        }
+    }
+}
+?>

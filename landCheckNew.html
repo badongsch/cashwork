@@ -1,0 +1,150 @@
+<?
+$httpOrigin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : null;
+if (in_array($httpOrigin, [
+	// 허용 IP 및 DOMAIN
+	//'http://localhost:3000', // Dev Client Server using CORS
+	'https://realmgrdev.realclick.co.kr', // Prod Client Server using CORS
+	'https://realdspdev.realclick.co.kr',
+	'https://realdsp.co.kr',
+	'https://realssp.co.kr',
+	'https://momento.dev',
+	'https://redirect.momento.dev',
+]))
+header("Access-Control-Allow-Origin: ${httpOrigin}");
+header('Access-Control-Allow-Credentials: true');
+header("Access-Control-Allow-Methods: POST, GET, PUT, DELETE, OPTIONS");
+header("Access-Control-Allow-Headers: Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization");
+header("Content-Type: text/html; charset=euc-kr");
+
+$headers = apache_request_headers();
+
+/*if(strpos($headers["Content-Type"], "json") !== false){
+    $headers = apache_request_headers();
+    header("Content-Type: application/json; charset=euc-kr");
+    header("x-openrtb-version: 2.3");
+}*/
+
+// wow 입력시 테스트(Get  방식)
+if(strpos($headers["Content-Type"], "json") !== false){
+    $data = json_decode(file_get_contents('php://input'), true);
+}
+else{
+    $data = ($_GET);
+    $test = $data[wow];
+}
+
+// **********************************************************************************************************
+// =============================================   api 호출 기록   ===========================================
+// **********************************************************************************************************
+
+// 장애대체서버 레디스 DB정보
+$redis_info['emergency']['host'][0]   = '58.229.127.157';
+$redis_info['emergency']['port'][0]   = '6378';
+
+$redis_info['emergency']['host'][1]   = '58.229.127.157';
+$redis_info['emergency']['port'][1]   = '6379';
+
+$redis_info['emergency']['host'][2]   = '58.229.127.157';
+$redis_info['emergency']['port'][2]   = '6380';
+
+$redis_info['emergency']['host'][3]   = '58.229.127.165';
+$redis_info['emergency']['port'][3]   = '6378';
+
+$redis_info['emergency']['host'][4]   = '58.229.127.165';
+$redis_info['emergency']['port'][4]   = '6379';
+
+$redis_info['emergency']['host'][5]   = '58.229.127.165';
+$redis_info['emergency']['port'][5]   = '6380';
+
+// 앱연동 - rpid (폰아이디)
+$redis_info['app_test']['host']   = '58.229.127.135';
+$redis_info['app_test']['port']   = '6379';
+$redis_info['app_test']['dbname'] = '10';
+$redis_info['app_test']['pass']   = 'ahtsksdl!!';
+
+function newRedisCon($pos)
+{
+	global $redis_info;
+
+	if(!$pos) return false;
+
+	$db_name = $pos.'DB_red';
+
+	$$db_name = new Redis();
+	try {   // localhost 레디스 접속
+		$$db_name->connect($redis_info[$pos]['host'], $redis_info[$pos]['port']);
+		$$db_name->auth($redis_info[$pos]['pass']);
+		$$db_name->select($redis_info[$pos]['dbname']);
+	} catch (Exception $e) { // localhost 레디스 접속 안되면 46서버 접속
+		if($pos == 'req' || $pos == 'bridge_req' || $pos == 'month_sum' || $pos == 'req') {
+			$$db_name->connect($redis_info[$pos]['host'], $redis_info[$pos]['port']);
+			$$db_name->auth($redis_info[$pos]['pass']);
+			$$db_name->select($redis_info[$pos]['dbname']);
+		}
+		else {
+			$e_srv_no = rand(0, 5);
+			$$db_name->connect($redis_info['emergency']['host'][$e_srv_no], $redis_info['emergency']['port'][$e_srv_no]);
+			$$db_name->auth($redis_info[$pos]['pass']);
+			$$db_name->select($redis_info[$pos]['dbname']);
+		}
+	}
+
+	return $$db_name;
+}
+$appTestCountRedis = newRedisCon('app_test');
+$appTestCountRedis->hIncrBy('req:'.date('Ymd'), 'landCheck:'.$_SERVER['REMOTE_ADDR'].':t'.date('H'), 1);
+$appTestCountRedis->expire('req:'.date('Ymd'), 86400*2); // [ expire time ] 2일 
+$appTestCountRedis->close();
+
+// **********************************************************************************************************
+// =============================================   출력함수   ===============================================
+// **********************************************************************************************************
+function api_output($resultcode=0) {
+    global $_COOKIE;
+
+    $res = '';
+	
+	if( $resultcode==222 ) {
+		$res['cookie']['rpid']  = $_COOKIE['rpid'];
+		$res['cookie']['radid']  = $_COOKIE['radid'];
+		echo json_encode($res, JSON_UNESCAPED_UNICODE);
+	} else {
+		$res['resultcode']  = $resultcode;
+		echo json_encode($res, JSON_UNESCAPED_UNICODE);
+	}
+	exit;
+}
+
+if( $_GET['m']=='set' ) {
+
+	$rpid = $_GET['rpid'];
+	$radid = $_GET['radid'];
+
+	$COOK_SAVE_DAY = 1;
+	$COOK_DOMAIN = ".realclick.co.kr";	//저장 쿠키 도메인
+	
+	// 쿠키처리
+	$expire = time()+(3600 * 24 * $COOK_SAVE_DAY); // === 소멸시점 1일후
+
+	if ( empty($_GET['rpid'])===true || empty($_GET['radid'])=== true ) {
+		api_output(400);
+	} else {
+		setcookie('rpid',  $rpid, $expire,"/; SameSite=None; Secure; httpOnly;",$COOK_DOMAIN);
+		setcookie('radid',  $radid, $expire,"/; SameSite=None; Secure; httpOnly;",$COOK_DOMAIN);
+        
+        setcookie('RTrpid',  $rpid, $expire,"/; SameSite=None; Secure; httpOnly;",$COOK_DOMAIN);
+		setcookie('RTradid',  $radid, $expire,"/; SameSite=None; Secure; httpOnly;",$COOK_DOMAIN);
+        	
+		api_output(200);
+	}
+
+} else if ( $_GET['m']=='get' ) {
+
+	api_output(222);
+
+} else {
+
+	api_output(400);
+
+}
+?>

@@ -1,0 +1,65 @@
+<? 
+/**********************************************************************/
+// 프로그램명   : common_applink_var.rc
+// 제목         : 공통변수(캐쉬워크)
+// 작성자       : 유동수
+// 작성일       : 2022-05-02 
+// 수정일       : 
+// 프로그램 설명: 공통변수
+/**********************************************************************/
+//$test = $_REQUEST['wow']?$_REQUEST['wow']:false; // 로그 보기 설정 World Of Word
+//$rq = json_decode($rq, true);
+
+$g_mcode        = $rq[m]?$rq[m]:"";                 // 지면코드
+$rpid		    = $rq [rpid]?$rq[rpid]:"";		    // 폰ID
+$package        = $rq[rpkgname]?$rq[rpkgname]:"";   // pkg명
+$adid           = $rq[radid]?$rq[radid]:"";         // 광고ID (Apple advertising identifier / Google advertising id)
+$display_type   = $rq[resp]?$rq[resp]:"json";       // 응답 포맷(필수) json or xml
+$app_ip         = $rq[ip]?$rq[ip]:"";               // 클라이언트 IP정보
+$u              = $rq['u']?urldecode($rq['u']):"";  // User Agent(Url Endcode된 값)
+//$s              = $rq['s']?$rq['s']:"";             // 키값
+//$refer          = $rq['refer']?$rq['refer']:"";     // referer
+//$app_cookie     = $rq['cookie']?$rq['cookie']:"";   // 쿠키값
+
+if($display_type == "xml"){
+	header("Content-type: text/xml"); 
+} else {
+	header('Access-Control-Allow-Origin: *');
+}
+
+// reason :장애발생시 코멘트 :광고가 존재하지 않습니다.
+$errno_app = 0;
+
+// === 헤더값 정의 === 
+header("Expires: Mon, 26 Jul 2016 05:00:00 /GMT");
+header("Last-Modified: " . gmdate("D, d M Y H:i:s") . " GMT");
+header("Cache-Control: no-cache, must-revalidate");
+header("Pragma: no-cache");
+
+// json 형식의 프리퀀시의 최대 프리퀀시
+$total_freq = 20;
+
+//현재시간
+$now_T = time();
+$now_day  = date("w"); // 요일 (0:일요일~6:토요일)
+$now_time = date("G"); // 시간 (0: 00:00~ 23: 23:00)
+
+// === 이미지 경로(ORG) ===
+$realdsp_imgorg = "https://dspimgorg.realclick.co.kr/";
+// === 이미지 경로(CDN) ===
+$realdsp_img = "https://dspimg.realclick.co.kr/";
+$mdimg_img = "https://mdimg.realclick.co.kr/";
+
+// === 소진클릭 경로 === 
+$realdsp_click_url = "https://realadr.realclick.co.kr/dsp/?";
+
+// === imp/rec 카운터=== 
+$realdsp_imp_url = "https://itg.realclick.co.kr/itg_app.rc?";
+
+// === imgurl로 처리 : 별도 노출 카운트 url === 
+$arr_imgurl = array('wotjr711200003_36408' , 'momento00001_36543', 'momento00001_36573');
+
+// === 심야시간 노출에 따른 허용 시간 ===
+$ALLOW_NIGHT_START_TIME = 0;
+$ALLOW_NIGHT_END_TIME = 5;
+?>

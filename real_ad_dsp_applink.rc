@@ -1,0 +1,86 @@
+<?php
+/********************************************************************************************/
+// 프로그램명        :  real_ad_dsp_applink.php
+// 설명              :  앱타겟팅 API
+// 작성자            :  류동수
+// 작성일            :  2022.04.05
+// 수정일            :  
+// 프로그램 설명     :  DSP의 광고 호출 방식 분기처리
+// 처리절차          :  DBCON(maria/mongo/redis) -> Header정의  -> 파라메터정리 -> 지면정보호출 -> 타겟정보 -> 광고호출비딩 -> 광고노출 -> 노출count/cpm 노출과금
+// 수정사항          :  
+/********************************************************************************************/
+// header('Access-Control-Allow-Origin: *');
+// wow 파리메터 체크
+$test = $_GET[wow];
+if($test){
+    $rq = $_GET;
+}
+else{
+    $rq = json_decode(file_get_contents('php://input'), true);
+    $test = $rq[wow];
+    $headers = apache_request_headers();
+    $_SERVER["REMOTE_ADDR"] = $headers[REMOTE_ADDR];
+    if($test){
+        echo "<b>[ real_ad_dsp_applink Param ]</b> - ".json_encode($rq)."<br>";
+        echo "<b>[ real_ad_dsp_applink Header ]</b> - ".json_encode($headers)."<br>";
+    }
+}
+
+if(isJson($rq)){
+	// === DB connecting ===
+	include_once("../inc/dbcon.rc");
+    include_once("../inc/db_info.rc");          // DB 접속 정보 파일
+    include_once("../static/common_func.rc");   // 공통 함수
+	include_once("../inc/redis_conn.rc");	    // Redis 접속 및 ucode 블럭
+
+    include_once("./common_applink_var.rc");    // 공통 변수
+    include_once("./target_func_app.rc");       // 타겟팅 함수
+
+
+    if($test){
+        echo "
+                <table class='table table-condensed' style='padding: 0px;'>
+                    <tbody><tr>
+                        <th class='danger' colspan='8' style='text-align: center; font-size: large'><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 광고호출 API 앱타겟팅(캐쉬워크) - real_ad_dsp_applink.php >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                    </th></tr>
+                </tbody></table>";
+        echo "<b>[0] 테스트 url : </b>https://realdsp77.realclick.co.kr/app_api/real_ad_dsp_applink.rc?m={$g_mcode}&resp=json&rpid={$rpid}&pakage={$package}&u={$u}&wow=1 </br>";
+        echo "<b>[1] 파라메터 : </b>";
+        echo "<b>rpid : </b>$rpid  <b>/ adid : </b>$adid <b>/ g_mcode : </b>$g_mcode <b>/ display_type : </b>$display_type <b>/ u : </b>$u <br>";
+        echo "<b>[2] UserIP : $_SERVER[REMOTE_ADDR] </b>";
+        echo "<br>";
+    }
+
+	ob_start(); // Initiate the output buffer
+	if((empty($rpid) && empty($adid) )|| empty($g_mcode) || empty($display_type)){
+		$errno_app = 1;
+	} else {
+		// === Header 정보 : Header 정의 정보 ===
+		// === 파라메터 정보 : ssp에 보내주는 정보 ===
+		// === 매체(지면) 정보 : 지면코드를 통한 지면 정보 ===
+		include_once("applink_1_media_info.rc");
+        
+		if($errno_app != 6){
+			// === 타겟팅 정보 : 타겟팅에 관련된 정보 ===
+			include_once("applink_2_target_info.rc");
+                
+            if($errno_app == 0 && $IS_APP){
+				// === 광고정보 정보 : 각 지면/타겟/비딩을 통한 광고 정보 호출 ===
+                include_once("applink_3_ad_info.rc");	
+				// === 광고노출 처리 : 호출된 광고를 화면에 노출 ===	
+			}
+		}
+	}
+	ob_end_flush(); // Flush the output from the buffer
+} else {
+	$errno_app = 2;		
+}
+
+include_once ('./applink_json.rc');
+
+function isJson($string) {
+    //print_r($string);
+    //json_decode($string);
+    return (json_last_error() == JSON_ERROR_NONE);
+}
+?>

@@ -1,0 +1,227 @@
+<?php
+/********************************************************************************************/
+// 프로그램명        : applink_2_target_info.rc
+// 설명              : 타겟팅 정보
+// 작성자            : 유동수
+// 작성일            : 2022.04.05
+// 수정일            :  
+// 프로그램 설명     : 타겟팅 정보
+// 처리절차          :  
+// 수정사항          :  
+/********************************************************************************************/
+// mtype  매체 유형 (0:PC/1:M_Web/2:Android/3:iOS/4:기타/5:APP)
+if($test){
+    echo "
+    <table class='table table-condensed' style='padding: 0px;'>
+        <tbody><tr>
+            <th class='danger' colspan='8' style='text-align: center; font-size: large'><<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 타겟팅 정보 - applink_2_target_info.rc >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        </th></tr>
+    </tbody></table>";
+}
+//============================================== 기본 변수 ===========================================================
+$app_msize      = explode("x",$media_info['msize']);		// 배너 사이즈
+$app_msize_w    = $app_msize[0];							// 배너 가로 사이즈
+$app_msize_h    = $app_msize[1];							// 배너 세로 사이즈
+$tapp_arr       = $WHERE_APP = $WHERE_APP2 = $app_restore = array();
+$app_i          = 0;
+$app_r_url      = "";
+$app_reject_sg  = $media_info['reject_sg']?$media_info['reject_sg']:"";
+
+if($app_slot_cnt == ""){
+	$app_slot_cnt = 1;
+}
+
+//============================================== 유저 기기 ==============================================================
+if($errno_app == ''){
+    $mongo_localhost = FALSE;
+    $mongo_info = $dbinfo['MONGODB_DSP_LOCALHOST'];
+    $connectionString = sprintf('mongodb://%s:%s@%s:%d',  $mongo_info[db_user], $mongo_info[db_passwd],  $mongo_info[db_host], $mongo_info[db_port]);
+
+    try {
+        $mongo_localhost = TRUE;
+        $conn_dsp = new MongoClient($connectionString);
+        $db_dsp = $conn_dsp->realdsp;
+    } catch (MongoConnectionException $e) {
+        if($test){//throw $e;
+            echo "mongo ".$mongo_info[db_host]." 오류(0)<br/>".$e."<br/>";}
+        $mongo_localhost = FALSE;
+    }
+
+    if($test){
+        echo "<b></b>";
+    }
+/*
+    // 리타깃팅 키 - echo "{$adid}:RTBDSP";
+    // 리타깃팅 키 - echo "{$adid}:RTDDSP";
+    // 리타깃팅 키 - echo "{$adid}:RTKEYCODE";
+*/
+    // 폰아이디 매칭 확인
+    if($test){
+        echo "<span style='background-color: #7fff80;'>===================== Adid/PhoneId 매칭 데이터 =====================</span><br>";
+    }
+    $arr_sg_idx = fn_rpid_sg_idx();
+
+    // 유저관심사 확인
+    if($test){
+        echo "<span style='background-color: #7fff80;'>===================== 관심사 데이터 =====================</span><br>";
+    }
+    $interest_info = fn_interest_info($realucode);  // === 관심사정보 ===
+    $WHERE_interest = $interest_info[qry];
+    $WHERE_interest = (count($WHERE_interest) == 0) ? array():$WHERE_interest;
+
+    // [ 폰아이디 매칭 전략 확인 (쇼타/리타) ] ==========
+    if(count($arr_sg_idx[SRT]) > 0 || count($arr_sg_idx[RT]) > 0 ) {
+        // [ 쇼핑타겟팅 전략 ] ==========
+        if(count($arr_sg_idx[SRT]) > 0){
+            if($test){
+                echo "<span style='background-color: #7fff80;'>===================== 쇼핑타겟팅 시작 =====================</span><br>";
+            }
+
+            $WHERE_SHOP = array_merge($WHERE_targeting,array('retargeting_type' =>'2'));
+            $WHERE_SHOP = array_merge($WHERE_SHOP,array('shop_url' =>array('$exists'=>true)));
+            $WHERE_SHOP = array_merge($WHERE_SHOP,array('shop_type' =>'1'));
+            $WHERE_SHOP = array_merge($WHERE_SHOP, $WHERE_interest);    // 유저관심사
+
+            foreach($arr_sg_idx[SRT] as $key => $val){
+                $WHERE_SHOP = array_merge($WHERE_SHOP,array('sg_idx' =>strval($key)));
+                
+                if($test){
+                    echo "<b>[ 쇼타 조건문 ($key) ] : </b>".json_encode($WHERE_SHOP)."<br/>";
+                }
+                $sg_idx = fn_sg_ecpm($WHERE_SHOP);
+                
+                if($sg_idx){
+                    $arr_sg_idx_list[$key] = $val; // [쇼핑전략] => 상품코드
+                    $view_type = "SRT";
+                    if($test){
+                        echo "<b> =====> [ 쇼타 전략 ] : </b> $key <br/>";
+                        echo "<b><span style='color: blue;'> === 쇼핑타겟팅 전략 있음. ===</span></b><br>";
+                    }
+                    break;
+                }
+            }
+        }
+        // [ 리타겟팅 전략 ] ==========
+        //$view_type = "TEST";
+        if($view_type != "SRT"){
+            unset($arr_sg_idx_list);
+            if($test){
+                echo "<span style='color: red;'> === 쇼핑타겟팅 전략 없음. ===</span><br>";
+            }
+
+            if(count($arr_sg_idx[RT]) > 0){
+                if($test){
+                    echo "<span style='background-color: #7fff80;'>===================== 리타겟팅 시작 =====================</span><br>";
+                }
+                $WHERE_RETAR = array_merge($WHERE_targeting, array('retargeting_type' =>'1'));
+                $WHERE_RETAR = array_merge($WHERE_RETAR, $WHERE_interest);    // 유저관심사
+
+                $arr_sg_idx_value = @array_unique($arr_sg_idx[RT]);
+                $arr_sg_idx_value = array_values($arr_sg_idx_value);
+                
+                $WHERE_RETAR = array_merge($WHERE_RETAR, array('uid'=>array('$in'=> $arr_sg_idx_value)));
+                if($test){
+                    echo "<b>[ 리타 조건문 ] : </b>".json_encode($WHERE_RETAR)."<br/>";
+                }
+
+                $sg_idx = fn_sg_ecpm($WHERE_RETAR);
+                if($sg_idx){
+                    $arr_sg_idx_list[$sg_idx] = "RT";
+                    $view_type = "RT";                    
+                    if($test){
+                        echo "<b> =====> [리타 전략] : </b> $sg_idx <br/>";
+                        echo "<b><span style='color: blue;'> === 리타겟팅 전략 있음. ===</span></b><br>";
+                    }
+                }
+            }
+        }
+    }
+    else{
+        if($test){
+            echo "<span style='background-color: #7fff80;'>===================== 쇼핑타겟팅 / 리타겟팅 시작 =====================</span><br>";
+        }
+    }
+
+    //$view_type = "TEST";
+    // [ ( 일반타겟팅 ) ] ==========
+    if($view_type != "SRT" && $view_type != "RT"){
+        unset($arr_sg_idx_list);
+        if($test){
+            echo "<span style='color: red;'> === 쇼핑/리타 전략 없음. ===</span><br>";
+            echo "<span style='background-color: #7fff80;'>===================== 일반타겟팅 시작 =====================</span><br>";
+        }
+
+        $WHERE_TAR = array_merge($WHERE_targeting, array('targeting_check'=>'1', 'retargeting_type' =>'0'));
+        $WHERE_TAR = array_merge($WHERE_TAR, $WHERE_interest);    // 유저관심사
+        if($test){
+            echo "<b>[ 일반 조건문 ] : </b>".json_encode($WHERE_TAR)."<br/>";
+        }
+
+        $sg_idx = fn_sg_ecpm($WHERE_TAR);
+        if($sg_idx){
+            $arr_sg_idx_list[$sg_idx] = "T";
+            $view_type = "T";
+            if($test){
+                echo "<b> =====> [일반 전략] : </b> $sg_idx <br/>";
+                echo "<b><span style='color: blue;'> === 일반타겟팅 전략 있음. ===</span></b><br>";
+            }
+        }
+    }
+
+    //$view_type = "TEST";
+    // [ ( 랜덤타겟팅 ) ] ==========
+    if($view_type != "SRT" && $view_type != "RT" && $view_type != "T"){
+        unset($arr_sg_idx_list);
+        if($test){
+            echo "<span style='color: red;'> === 일반타겟팅 전략 없음. ===</span><br>";
+            echo "<span style='background-color: #7fff80;'>===================== 랜덤타겟팅 시작 =====================</span><br>";
+        }
+
+        $WHERE_RAND = array_merge($WHERE_targeting, array('targeting_check'=>'1', 'retargeting_type' => array('$in'=> array('0','1')), 'ranchk' => 'Y'));
+        $WHERE_RAND = array_merge($WHERE_RAND, $WHERE_interest);    // 유저관심사
+        if($test){
+            echo "<b>[ 랜덤 조건문 ] : </b>".json_encode($WHERE_RAND)."<br/>";
+        }
+
+        $sg_idx = fn_sg_ecpm($WHERE_RAND);
+        if($sg_idx){
+            $arr_sg_idx_list[$sg_idx] = "R";
+            $view_type = "R";
+            if($test){
+                echo "<b> =====> [랜덤 전략] : </b> $sg_idx <br/>";
+                echo "<b><span style='color: blue;'> === 랜덤타겟팅 전략 있음. ===</span></b><br>";
+            }
+        }
+    }
+
+    //$view_type = "TEST";
+    // [ ( 논타겟팅 ) ] ==========
+    if($view_type != "SRT" && $view_type != "RT" && $view_type != "T" && $view_type != "R"){
+        unset($arr_sg_idx_list);
+        if($test){
+            echo "<span style='color: red;'> === 쇼타/리타/일반/랜덤타겟팅 전략 없음. ===</span><br>";
+            echo "<span style='background-color: #7fff80;'>===================== 논타겟팅 시작 =====================</span><br>";
+        }
+        $WHERE_NON = array_merge($WHERE, array('targeting_check'=>'0'));
+        
+        if($test){
+            echo "<b>[ 논타겟팅 조건문 ] : </b>".json_encode($WHERE_NON)."<br/>";
+        }
+
+        $sg_idx = fn_sg_ecpm($WHERE_NON);
+        if($sg_idx){
+            $arr_sg_idx_list[$sg_idx] = "N";
+            $view_type = "N";
+            if($test){
+                echo "<b> =====> [논타겟팅 전략] : </b> $sg_idx <br/>";
+                echo "<b><span style='color: blue;'> === 논타겟팅 전략 있음. ===</span></b><br>";
+            }
+        }
+        else{
+            if($test){
+                echo "<span style='color: red;'> === 논타겟팅 전략 없음. ===</span><br>";
+            }
+        }
+    }
+}
+?>
